@@ -78,7 +78,7 @@ selectCrossvalidationFiles {
 
 generateCrossvalidationInputFiles.dependsOn selectCrossvalidationFiles
 
-legacyInit.dependsOn wav, text, lab, selectCrossvalidationFiles, generateCrossvalidationInputFiles
+legacyInit.dependsOn wav, text, unpackLab, selectCrossvalidationFiles, generateCrossvalidationInputFiles
 
 synthesizeCrossvalidationAudio.dependsOn('build')
 
