@@ -73,15 +73,16 @@ task unpackLab(type: Copy) {
 
 selectCrossvalidationFiles {
     dependsOn wav, text, unpackLab
-    selectCrossvalidationFiles.excludeList = ["arctic_a0438", "arctic_a0439", "arctic_b0391"]
+    selectCrossvalidationFiles.excludeList = ["arctic_a0438", "arctic_a0439", "arctic_b0391", "arctic_b0152", "arctic_a0324", "arctic_a0325"]
 }
 
 generateCrossvalidationInputFiles.dependsOn selectCrossvalidationFiles
 
-legacyInit.dependsOn wav, text, lab, selectCrossvalidationFiles, generateCrossvalidationInputFiles
+legacyInit.dependsOn wav, text, unpackLab, selectCrossvalidationFiles, generateCrossvalidationInputFiles
 
 synthesizeCrossvalidationAudio.dependsOn('build')
 
 getRealisedDurations.dependsOn synthesizeCrossvalidationAudio
 
 runCrossvalidation.dependsOn getRealisedDurations, synthesizeCrossvalidationAudio, moveReferenceFiles
+
