@@ -1,9 +1,11 @@
 buildscript {
     repositories {
         mavenLocal()
+        jcenter()
     }
     dependencies {
         classpath "de.dfki.mary:gradle-marytts-crossvalidation-plugin:0.1-SNAPSHOT"
+        classpath "org.m2ci.msp:jtgt:0.5.3"
     }
 }
 
@@ -51,6 +53,9 @@ dependencies {
 }
 
 import de.undercouch.gradle.tasks.download.Download
+import groovy.json.JsonBuilder
+import org.m2ci.msp.jtgt.io.*
+import marytts.util.io.BasenameList
 
 task downloadKaldiLabFiles(type: Download) {
     src 'https://github.com/insa-k/voice-cmu-rms-kaldi-data/releases/download/kaldi-lab/lab.zip'
@@ -71,17 +76,137 @@ task unpackLab(type: Copy) {
     dependsOn downloadKaldiLabFiles
 }
 
+String[] getCvExcludeList(File cvExcludeListFile) {
+    if (cvExcludeListFile.length() > 0 ) {
+        def cvExcludeList = new BasenameList(cvExcludeListFile.path)
+        return cvExcludeList.getListAsArray()
+    }
+    else {
+        return []
+    }
+}
+
+void updateCvExcludeList(File cvExcludeListFile, File cvFile) {
+    def cvList = new BasenameList(cvFile.path)
+    if (cvExcludeListFile.length() > 0 ) {
+        def cvExcludeList = new BasenameList(cvExcludeListFile.path)
+        cvExcludeList.add(cvList.getListAsArray())
+        cvExcludeList.write(cvExcludeListFile)
+    }
+    else {
+        def cvExcludeList = new BasenameList()
+        cvList.write(cvExcludeListFile)
+    }
+}
+
+double calculateFoldLength(double k, double x) {
+    // for a k-fold crossvalidation
+    double y = x / k
+    // round this number up
+    return y.trunc() + 1
+}
+
 selectCrossvalidationFiles {
-    dependsOn wav, text, unpackLab
-    selectCrossvalidationFiles.excludeList = ["arctic_a0438", "arctic_a0439", "arctic_b0391"]
+    // for a 10-fold crossvalidation
+    dependsOn lab, wav, text
+
+    ext.cvResultsDir = project.file("$projectDir/crossvalidation-kaldi")
+    ext.cvExcludeListFile = project.file("$cvResultsDir/cvExcludeList.lst")
+
+    doFirst {
+        if (!cvResultsDir.exists()) {
+            cvResultsDir.mkdir()
+        }
+
+        if (!(cvExcludeListFile.exists())) {
+            cvExcludeListFile.createNewFile()
+        }
+
+        // total number of files minus those excluded from the voicebuilding process
+        def x = wav.destDir.listFiles().length - 6
+        def y = calculateFoldLength(10, x)
+        selectCrossvalidationFiles.nbCvFiles = y
+        selectCrossvalidationFiles.cvExcludeList = getCvExcludeList(cvExcludeListFile)
+    }
+    selectCrossvalidationFiles.excludeList = ["arctic_a0438", "arctic_a0439", "arctic_b0391", "arctic_b0152", "arctic_a0324", "arctic_a0325"]
+    ext.cvFile = selectCrossvalidationFiles.cvFile
+    doLast {
+        updateCvExcludeList(cvExcludeListFile, cvFile)
+    }
 }
 
 generateCrossvalidationInputFiles.dependsOn selectCrossvalidationFiles
 
-legacyInit.dependsOn wav, text, unpackLab, selectCrossvalidationFiles, generateCrossvalidationInputFiles
+moveReferenceFiles {
+    ext.refDir = moveReferenceFiles.refDir
+}
 
-synthesizeCrossvalidationAudio.dependsOn('build')
+legacyInit.dependsOn wav, text, unpackLab, selectCrossvalidationFiles, generateCrossvalidationInputFiles, moveReferenceFiles
 
-getRealisedDurations.dependsOn synthesizeCrossvalidationAudio
+getRealisedDurations {
+    dependsOn synthesizeCrossvalidationAudio
+    ext.outputDir = getRealisedDurations.destDir
+}
 
-runCrossvalidation.dependsOn getRealisedDurations, synthesizeCrossvalidationAudio, moveReferenceFiles
+runCrossvalidation {
+    dependsOn getRealisedDurations, synthesizeCrossvalidationAudio
+    doLast {
+        createPlottingData(runCrossvalidation.timestamp)
+    }
+}
+
+Map retrieveDurations(File labFile) {
+    def map = [:]
+    def xLabSer = new XWaveLabelSerializer()
+    def tg = xLabSer.fromString(labFile.text)
+    def nbPhones = 0
+    def length = 0
+    tg.tiers.find { it.name == 'phones' }.annotations.each {
+        // exclude the silences
+        if (it.getText() != "_") {
+            nbPhones++
+            length += it.getEnd() - it.getStart()
+        }
+    }
+    map.put("nbPhones", nbPhones)
+    map.put("length", length)
+    return map
+}
+
+void createPlottingData(String timestamp) {
+    def resultsDir = project.file("${selectCrossvalidationFiles.cvResultsDir}/results")
+    if (!(resultsDir.exists())) {
+        resultsDir.mkdir()
+    }
+    def jsonFile = project.file("$resultsDir/kaldi-results${timestamp}.json")
+    if (!(jsonFile.exists())) {
+        jsonFile.createNewFile()
+    }
+    def rmslsfResults = project.file("$buildDir/crossvalidation/rmslsfdistortion-results-${timestamp}.txt")
+    def json = []
+    def xLabSer = new XWaveLabelSerializer()
+    rmslsfResults.eachLine { line, count ->
+        if (!(count == 1)) {
+            line.splitEachLine(' ') { items ->
+                if (items[0] != ("Global")) {
+                    def refFile = project.file("${moveReferenceFiles.refDir}/${items[0]}.lab")
+                    def synthFile = project.file("${getRealisedDurations.outputDir}/${items[0]}.lab")
+                    def refMap = retrieveDurations(refFile)
+                    def synthMap = retrieveDurations(synthFile)
+                    json <<
+                            ["filename"            : items[0],
+                             "labeler"             : "KALDI",
+                             "mean"                : Double.parseDouble(items[2]),
+                             "stddev"              : Double.parseDouble(items[4]),
+                             "nbPhones_original"   : refMap.get("nbPhones"),
+                             "nbPhones_synthesized": synthMap.get("nbPhones"),
+                             "length_original"     : refMap.get("length"),
+                             "length_synthesized"  : synthMap.get("length")
+                            ]
+                }
+            }
+        }
+        jsonFile.text = new JsonBuilder(json).toPrettyString()
+    }
+
+}
