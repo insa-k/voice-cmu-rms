@@ -1,0 +1,6 @@
+#!/bin/bash
+
+./gradlew clean
+./gradlew legacyInit --info
+./gradlew build --info
+./gradlew runCrossvalidation --info
