@@ -112,27 +112,49 @@ selectCrossvalidationFiles {
     selectCrossvalidationFiles.excludeList = ["arctic_a0438", "arctic_a0439", "arctic_b0391", "arctic_b0152", "arctic_a0324", "arctic_a0325"]
     ext.cvFile = selectCrossvalidationFiles.cvFile
     doLast {
-        updateCvExcludeList(cvExcludeListFile, cvFile)
+        if (cvFile.length() > 0) {
+            updateCvExcludeList(cvExcludeListFile, cvFile)
+        }
     }
 }
 
-generateCrossvalidationInputFiles.dependsOn selectCrossvalidationFiles
+generateCrossvalidationInputFiles{
+    dependsOn selectCrossvalidationFiles
+    onlyIf {
+        selectCrossvalidationFiles.cvFile.length() > 0
+    }
+}
 
 moveReferenceFiles {
     ext.refDir = moveReferenceFiles.refDir
+    onlyIf {
+        selectCrossvalidationFiles.cvFile.length() > 0
+    }
 }
 
 legacyInit.dependsOn wav, text, lab, selectCrossvalidationFiles, generateCrossvalidationInputFiles, moveReferenceFiles
 
+synthesizeCrossvalidationAudio {
+    onlyIf {
+        selectCrossvalidationFiles.cvFile.length() > 0
+    }
+}
+
 getRealisedDurations {
     dependsOn synthesizeCrossvalidationAudio
     ext.outputDir = getRealisedDurations.destDir
+    onlyIf {
+        selectCrossvalidationFiles.cvFile.length() > 0
+    }
 }
 
 runCrossvalidation {
     dependsOn getRealisedDurations, synthesizeCrossvalidationAudio
     doLast {
         createPlottingData(runCrossvalidation.timestamp)
+    }
+    onlyIf {
+        selectCrossvalidationFiles.cvFile.length() > 0
     }
 }
 
