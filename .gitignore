@@ -6,5 +6,8 @@ build/
 .idea/
 *.iml
 
+# crossvalidation results
+crossvalidation-*
+
 # OSX
 .DS_Store
