@@ -103,7 +103,12 @@ double calculateFoldLength(double k, double x) {
     // for a k-fold crossvalidation
     double y = x / k
     // round this number up
-    return y.trunc() + 1
+    if(y % 1 != 0 ) {
+        return y.trunc() + 1
+    }
+    else {
+        return y
+    }
 }
 
 selectCrossvalidationFiles {
